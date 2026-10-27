@@ -148,3 +148,65 @@ Scratch file. Source material for DECISIONS.md later; not a final document.
   slug.
 - **API-level isolation tests** (user of A calling routes with B's ids) come
   with the routes in Phases 5–8.
+
+## Phase 4 — Seed
+
+- **PIN hashing: Node's built-in scrypt** (agreed; CLAUDE.md said argon2 or
+  bcrypt). Memory-hard, no dependency, no native build on Vercel. N=2^15,
+  r=8, p=1 (32 MiB, roughly 50–100 ms). Parameters are stored in the hash, so
+  they can be raised later. Honest limit: a 4–6 digit PIN space falls to an
+  offline brute force whatever the hash, so the real protection is the login
+  rate limit and lockout (Phase 5). Offline case: see PIN_PEPPER below.
+- **Bill calculation built now, not in Phase 8**: the seed needs it to write
+  correct totals snapshots. `lib/bill.ts` is pure, with integer half-up
+  rounding at each step. VAT is charged on the service charge (subtotal →
+  discount → service → VAT). An AMOUNT discount larger than the subtotal is
+  capped (the total is never negative); the API should still reject it.
+- **Seed runs on plain Node** (type stripping), no `tsx` dependency. That
+  required `importFileExtension = "ts"` on the Prisma generator. Next build
+  and typecheck are verified with it.
+- **Fixed restaurant ids** for the two demo tenants. The seed can't look a
+  restaurant up by slug without a tenant context (RLS), but it can set the
+  context to a known id and check whether it exists.
+- **Every seed write happens inside the tenant context**, one transaction per
+  restaurant. Works whether or not the owner bypasses RLS (local superuser:
+  yes; Neon owner: no). A failure leaves no half-written tenant.
+- **Idempotent = skip if present**; `--reset` recreates only the two demo
+  tenants. Re-running never wipes what a reviewer did in the app. Live
+  orders are relative to seed time; reseed before a demo to make them fresh.
+- **Deterministic shape** (fixed PRNG seed per restaurant), timestamps
+  relative to now. Verified by SQL: payments equal totals on every settled
+  order, stored subtotals match the lines, Thursday 17:00+ and Friday peaks
+  show up, card reader dominates, about 11% of bills are split.
+- **Service charge 0% at the café, 10% at the Tehran restaurant**:
+  realistic for each, and both bill shapes appear in the demo. Flip one
+  constant in seed-data.mts if you want the café to show a service charge.
+- **Phone numbers are obviously fake** (0917000000x / 0912000000x) so no
+  real person's number is in the repo.
+- **Not under automated test**: the seed itself (verified by SQL checks
+  above). Candidate for the "what we didn't test" list.
+
+### PIN pepper (added after Phase 4)
+
+- **PINs are HMAC-SHA256'd with `PIN_PEPPER`, then hashed with scrypt.**
+  Why: a 4–6 digit PIN has at most 1,000,000 values. With scrypt alone,
+  anyone holding the `pin_hash` column (a leaked backup, a DB dump, SQL
+  injection) can try every PIN offline in minutes, and slowing the hash
+  can't fix a search space that small. The pepper is a secret that lives only
+  in the app's environment (Vercel env vars), never in the database. A leaked
+  database alone is no longer enough to recover PINs; the attacker needs the
+  app's env too. Online guessing stays the rate limiter's job.
+- **Fail closed**: `hashPin`/`verifyPin` throw on an empty pepper rather than
+  silently degrading to plain scrypt. Env validation requires ≥ 32 chars.
+- **The pepper is passed in, not read inside `lib/pin.ts`**, so the module
+  stays importable by the plain-Node seed and trivially testable. The app
+  passes `getEnv().PIN_PEPPER`.
+- **New hash tag `scrypt-hmac$…`**: a hash from before the pepper (`scrypt$…`)
+  verifies as false instead of being misread. Only demo data existed, so
+  nothing needed migrating; the local dev DB was reseeded.
+- **Operational cost**: the seed and the app must share one value (else demo
+  logins fail), and changing it invalidates every stored PIN. Rotation would
+  need a pepper id in the hash; not built for v1.
+- **Local values** in `.env.example` / compose are dev-only placeholders,
+  like the local DB passwords. Production gets a fresh random value
+  (`openssl rand -base64 32`), set in Vercel and in the shell that seeds Neon.

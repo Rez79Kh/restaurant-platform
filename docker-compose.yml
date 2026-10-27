@@ -28,6 +28,7 @@ services:
       DATABASE_URL: postgresql://app_user:app_user_local@db:5432/restaurant
       DIRECT_URL: postgresql://postgres:postgres@db:5432/restaurant
       APP_DB_PASSWORD: app_user_local
+      PIN_PEPPER: local-dev-pin-pepper-not-for-production-0001
       LOG_LEVEL: info
     ports:
       - "3000:3000"

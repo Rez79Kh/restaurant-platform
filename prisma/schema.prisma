@@ -14,6 +14,9 @@
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
+  // .ts import extensions let plain Node (type stripping) run scripts that
+  // use the client, e.g. the seed, with no TS runner dependency.
+  importFileExtension = "ts"
 }
 
 datasource db {

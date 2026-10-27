@@ -10,6 +10,9 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   // Runtime connection. Production: Neon pooled URL as app_user (see NOTES.md).
   DATABASE_URL: postgresUrl,
+  // HMAC key applied to PINs before scrypt (lib/pin.ts). Never stored in the
+  // database. Must match the value the seed ran with, or demo logins fail.
+  PIN_PEPPER: z.string().min(32, "must be at least 32 characters (openssl rand -base64 32)"),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),

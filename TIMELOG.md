@@ -11,6 +11,7 @@ written during the work, not afterwards. Entries line up with the commit history
 | 1405/08/05 | 17:40 | 18:05 | 0:25 | Phase 2: scaffold Next.js, Docker, Prisma, logging, env validation |
 | 1405/08/05 | 18:15 | 18:50 | 0:35 | Phase 3: domain schema, RLS tenant isolation, isolation tests |
 | 1405/08/05 | 18:50 | 19:00 | 0:10 | Vercel + Neon connected; live URL checked from Iran without VPN |
+| 1405/08/05 | 19:00 | 19:40 | 0:40 | Phase 4: seed data, bill calculation, PIN hashing with pepper (bill calc moved here from Phase 8; pepper added after review) |
 
-**Total so far:** 2:35 / 6:00
+**Total so far:** 3:15 / 6:00
 **Overrun:** none so far

@@ -13,9 +13,11 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "postinstall": "prisma generate",
-    "db:setup": "prisma migrate deploy && node scripts/set-app-db-password.mts",
+    "db:setup": "prisma migrate deploy && node scripts/set-app-db-password.mts && node prisma/seed.mts",
     "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration"
+    "test:integration": "vitest run --project integration",
+    "db:seed": "node prisma/seed.mts",
+    "db:reseed": "node prisma/seed.mts --reset"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",

@@ -3,6 +3,7 @@ import {
   TEST_APP_DB_PASSWORD,
   TEST_DATABASE_URL,
   TEST_DIRECT_URL,
+  TEST_PIN_PEPPER,
 } from "./tests/integration/test-env.ts";
 
 export default defineConfig({
@@ -32,6 +33,7 @@ export default defineConfig({
             DATABASE_URL: TEST_DATABASE_URL,
             DIRECT_URL: TEST_DIRECT_URL,
             APP_DB_PASSWORD: TEST_APP_DB_PASSWORD,
+            PIN_PEPPER: TEST_PIN_PEPPER,
           },
         },
       },

@@ -13,8 +13,8 @@ Requires Docker.
 docker compose up --build
 ```
 
-Then open <http://localhost:3000>. This starts Postgres, applies migrations
-and runs the app in production mode. Health check: <http://localhost:3000/api/health>.
+Then open <http://localhost:3000>. This starts Postgres, applies migrations,
+seeds the demo data and runs the app in production mode. Health check: <http://localhost:3000/api/health>.
 
 The compose Postgres is published on host port **5433** (not 5432) so it does
 not collide with a Postgres you may already run. Override with
@@ -22,7 +22,40 @@ not collide with a Postgres you may already run. Override with
 
 ### Demo logins
 
-_To be added (Phase 4)._
+Log in with restaurant slug + phone + PIN. Demo PINs only: never reuse in production.
+
+**کافه نارنج** (Shiraz café), slug `cafe-narenj`: a week of history, 5 open orders
+
+| Role | Name | Phone | PIN |
+|---|---|---|---|
+| Manager | مریم کاظمی | 09170000001 | 1234 |
+| Staff | علی رضایی | 09170000002 | 1111 |
+| Staff | سارا احمدی | 09170000003 | 2222 |
+| Staff | حسین محمدی | 09170000004 | 3333 |
+| Kitchen | نرگس حسینی | 09170000005 | 4444 |
+
+**رستوران کوچه** (Tehran restaurant, used to demonstrate isolation), slug `kucheh`
+
+| Role | Name | Phone | PIN |
+|---|---|---|---|
+| Manager | رضا موسوی | 09120000001 | 5555 |
+| Staff | فاطمه کریمی | 09120000002 | 6666 |
+| Kitchen | محمد جعفری | 09120000003 | 7777 |
+
+### Demo data
+
+The seed ([prisma/seed.mts](prisma/seed.mts)) is idempotent: it creates the two
+demo restaurants only if they are missing. `npm run db:reseed` deletes and
+recreates them (and nothing else), refreshing "live" orders to the current time.
+
+- Café: 34 menu items in five categories (some marked unavailable), 10 tables,
+  about 210 settled orders over the last week. Thursday evening and Friday are
+  the busiest. Card reader is dominant, then card-to-card and cash, with split
+  bills. A few discounts and voids, each with a reason and an audit entry.
+- Five open orders in different states: items ready to serve, items in the
+  kitchen, a second round of items, a discounted bill, and a takeaway.
+- VAT 10% for both (to be confirmed for 1405). Service charge 0% at the café,
+  10% at the Tehran restaurant.
 
 ## Development
 
@@ -32,7 +65,7 @@ Requires Node 24+.
 cp .env.example .env
 docker compose up -d db     # Postgres only
 npm install                 # also generates the Prisma client
-npm run db:setup            # apply migrations, set the app_user password
+npm run db:setup            # migrations, app_user password, demo data
 npm run dev                 # http://localhost:3000
 ```
 
@@ -43,7 +76,8 @@ npm run dev                 # http://localhost:3000
 | `npm test` | All tests. Integration tests need `docker compose up -d db` and use a separate `restaurant_test` database |
 | `npm run test:unit` / `test:integration` | One project only |
 | `npm run db:migrate` | Create a new migration (`prisma migrate dev`) |
-| `npm run db:setup` | Apply migrations and set the `app_user` password (idempotent) |
+| `npm run db:setup` | Apply migrations, set the `app_user` password, seed demo data (all idempotent) |
+| `npm run db:reseed` | Delete and recreate the two demo restaurants |
 
 ## Configuration
 
