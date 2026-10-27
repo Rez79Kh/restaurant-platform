@@ -386,3 +386,26 @@ Scratch file. Source material for DECISIONS.md later; not a final document.
 - **Not built**: receipts/printing (out of scope), change calculation for
   cash tendered, refunds after settle, editing a settled bill. A settled bill
   is final in v1.
+
+## Phase 9 — Full workflow test
+
+- **One API-level workflow test** (`tests/integration/workflow.test.ts`),
+  agreed instead of Playwright. Four people log in through the real login
+  route (two waiters, kitchen, manager):
+  - The waiter opens a table; both waiters add items at the same moment.
+  - The kitchen sees them on its next poll (no prices) and on its board,
+    and advances each item.
+  - The floor shows "ready"; the waiter serves; a second round goes through
+    the kitchen too.
+  - The manager discounts 10% with a reason.
+  - The exact bill is asserted with the arithmetic written out (including
+    a half-up VAT rounding).
+  - Three-way split payment; the order settles.
+  - The table is free, the kitchen board is clear, and the audit trail reads
+    discount → settle with the right actors.
+- **README "Testing"** maps each SCOPE §5 criterion to the tests that hold
+  it, and lists what we deliberately did not test, why, and what covers the
+  risk instead. The UI is the biggest untested surface. The only criterion
+  with no automated test is the usability claim ("under 10 minutes").
+- Suite: 108 tests (23 unit, 85 integration), about 10 s on the compose
+  Postgres.

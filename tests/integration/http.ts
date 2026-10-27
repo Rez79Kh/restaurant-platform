@@ -19,6 +19,7 @@ export async function call(
     cookie,
     ip = freshIp(),
     params = {},
+    key,
   }: {
     method?: string;
     path?: string;
@@ -26,10 +27,13 @@ export async function call(
     cookie?: string;
     ip?: string;
     params?: Record<string, string>;
+    /** Idempotency-Key header, for mutations. */
+    key?: string;
   } = {},
 ) {
   const headers: Record<string, string> = { "x-forwarded-for": ip };
   if (cookie) headers.cookie = cookie;
+  if (key) headers["idempotency-key"] = key;
   if (body !== undefined) headers["content-type"] = "application/json";
   const res = await handler(
     new Request(`http://localhost${path}`, {

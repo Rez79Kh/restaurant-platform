@@ -114,7 +114,51 @@ Tests in `tests/integration/isolation.test.ts` exercise each layer separately.
 
 ## Testing
 
-_To be written (Phase 9), including what we deliberately did not test and why._
+```bash
+docker compose up -d db   # integration tests need the compose Postgres
+npm test                  # 108 tests: 23 unit + 85 integration, about 10 s
+```
+
+Integration tests run against a real Postgres (a separate `restaurant_test`
+database) and call the real route handlers with real `Request` objects. They
+connect as `app_user`, so Row-Level Security is on, as in production. One test
+fails if the runtime connection is ever a superuser or table owner, because
+that would silently switch RLS off.
+
+### SCOPE's "done" criteria, and the tests that hold us to them
+
+| SCOPE §5 | Tests |
+|---|---|
+| Two staff adding items at the same moment, both on the bill | `ordering`: 10 simultaneous adds from two sessions all persist; `workflow` step 3 |
+| Kitchen changes status while a waiter works: nothing lost; real conflicts shown, never overwritten | `kitchen`: status change and add in parallel both succeed; two devices on one line → one 200, one 409 with the current state; stale `from` never overwrites |
+| A double-tap or resent request never duplicates | `ordering`: same request ×5 at once → applied once; retry after success → replayed; `checkout`: retried settle pays once; `kitchen`: retried status move replays, no false 409 |
+| A bill can't close unless payments match the total | `checkout`: 1 Toman over or under → 422, nothing written; settle racing an add or void never yields a bill that disagrees with its lines |
+| A menu price change never changes an open or past bill | `ordering`: name and price snapshots; `checkout`: settled bill unchanged by later price and VAT changes |
+| One restaurant can never see or change another's data | `isolation`: each of the three layers tested on its own; `ordering` and `kitchen`: a signed-in user of B against A's order, table, menu item and line ids → 404/409; `auth`: restaurant comes only from the session |
+| A new staff member takes an order in under 10 minutes | Not automated: needs a usability test with a real person (see below) |
+
+Also covered: the bill calculation (`lib/bill.test.ts`, half-up rounding at
+each step), PIN hashing with pepper, env validation, the request wrapper,
+login (lockout, per-IP limit, no account enumeration, Persian digits),
+sessions and expiry, every role rule in CLAUDE.md, and one full workflow
+(`tests/integration/workflow.test.ts`). It logs in four people and runs a
+table's check from opening to the settled, split-paid, discounted bill.
+
+### What we deliberately did not test, and why
+
+| Not tested | Why | What covers the risk instead |
+|---|---|---|
+| The browser UI (no Playwright or component tests) | Chosen trade-off for a 6-hour build: the risky logic (concurrency, money, isolation) lives on the server and is tested there. UI tests would add a browser dependency and setup time | Manual walk-through on a phone and a tablet. The UI only calls the tested API. Client-side key reuse on retry (`useAction`, `useLineActions`) is reviewed, not tested |
+| Real network faults (throttling, a drop mid-request) | No fault injection in the test setup | Idempotency is tested directly: same key, concurrent and after success, replays the stored result |
+| Polling cost and latency under load | No load-test tooling in scope | Cost is estimated in `app/api/changes/route.ts`. Cheap indexed queries; polling pauses in hidden tabs |
+| Neon's connection pooler (PgBouncer) | Tests run on plain Postgres | The tenant setting is transaction-local (`set_config(..., true)`), and a test proves it doesn't survive on a reused connection. Production smoke-checked after deploy |
+| Commit-order skew in `/api/changes` | Not reproducible deterministically | 10-second overlap window, and clients reload on change instead of merging |
+| Login timing equality; rate-limit bursts | Timing tests are flaky; bursts are a known small gap | Unknown accounts still run one scrypt. Limits are counted in Postgres, so a burst overshoots by at most the concurrent requests |
+| The seed script | Data, not behaviour | Verified with SQL checks: payments equal totals, subtotals match lines, weekly peaks present. Idempotent re-run checked by hand |
+| Log redaction | Config, reviewed once | Call sites mask phones (`maskPhone`); pino `redact` is a safety net |
+| Cookie behaviour across browsers | Needs real browsers | Standard attributes; `Secure` only over HTTPS so Safari keeps the cookie on `http://localhost` |
+| Persian number and Jalali date formatting | Relies on the platform's ICU data (`Intl`), not our code | Checked visually |
+| "Under 10 minutes without training" | A usability claim, not a code property | To be checked with someone who has never seen the app |
 
 ## Deployment
 

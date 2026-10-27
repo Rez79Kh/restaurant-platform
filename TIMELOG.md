@@ -16,6 +16,7 @@ written during the work, not afterwards. Entries line up with the commit history
 | 1405/08/05 | 20:10 | 20:55 | 0:45 | Phase 6: tables grid, order screen, idempotent adds, polling, concurrency tests; manual UI check |
 | 1405/08/05 | 20:55 | 21:35 | 0:40 | Phase 7: kitchen board, conditional status transitions, conflict handling, tests; manual UI check |
 | 1405/08/05 | 21:35 | 22:20 | 0:45 | Phase 8: discounts, voids, split payments, settle transaction, checkout tests; manual UI check |
+| 1405/08/05 | 22:20 | 22:35 | 0:15 | Phase 9: full-workflow test, README testing section |
 
-**Total so far:** 5:10 / 6:00
-**Overrun:** none so far
+**Total so far:** 6:10 / 6:00
+**Overrun:** 0:10
