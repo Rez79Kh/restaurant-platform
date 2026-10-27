@@ -308,3 +308,39 @@ Scratch file. Source material for DECISIONS.md later; not a final document.
   tool available in this session).
 - **Branch**: every query is scoped to the session's branch as well as the
   restaurant, even though v1 has one branch per restaurant.
+
+## Phase 7 — Kitchen
+
+- **One transition endpoint** (`POST /api/order-lines/[id]/status`,
+  `{from, to}`), a raw conditional UPDATE exactly as specified:
+  `WHERE id = $1 AND status = $from` joined to an OPEN order in the caller's
+  branch. Zero rows → 409 with the line's current state (and the order
+  status) in `details`. Conflicts logged at warn. Tested: two devices on one
+  line at once → exactly one 200, one 409 showing the winner's state.
+- **Allowed moves are a table** (`lib/orders/transitions.ts`): SENT→PREPARING
+  and PREPARING→READY for kitchen and manager, READY→SERVED for staff and
+  manager. Anything else is 422. Wrong role is 403 (checked before any DB
+  write). No "undo" moves and no skipping straight to READY: keeps the
+  kitchen's one-tap flow simple. Voids go through Phase 8 (reason + audit).
+- **Idempotency vs conditional updates**: a retried move with the same key
+  replays the 200 instead of producing a false 409. That's the case the generic
+  idempotency table was chosen for, now tested.
+- **UI never retries a 409**: `useLineActions` keeps an explicit state per
+  line: pending (button disabled), failed (network → "retry" with the same
+  key) or conflict (shows "changed by someone else, current status: X", then
+  refreshes; the user acknowledges). Used by both the kitchen board and the
+  waiter's "served" button.
+- **Kitchen board**: tablet grid of tickets per open order, sorted by the
+  oldest unfinished item. Age in minutes re-renders every 30 s and colours
+  the ticket (≥10 min amber, ≥20 min red). Notes in bold, big buttons.
+  **Lines voided in the last 15 minutes stay on the ticket, struck through
+  in red**: missed cancellations are one of SCOPE's named kitchen problems. No
+  prices are ever selected for the kitchen query (tested by regex on the
+  payload).
+- **Manager** can use the kitchen board (link from the floor) and move any
+  line; kitchen staff are redirected from `/` to `/kitchen`.
+- **Caught by review, not by tsc**: an unknown field in a nested Prisma
+  `select` type-checked fine and would only have failed at runtime. The
+  kitchen tests now cover that query.
+- **Not built**: per-station routing (bar vs kitchen), "start all" on a
+  ticket, sound alerts for new tickets. All candidates after v1.

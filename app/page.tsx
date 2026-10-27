@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { FloorView } from "@/components/floor";
 import { LogoutButton } from "@/components/logout-button";
@@ -13,7 +14,12 @@ export default async function Home() {
           <p className="font-bold">{auth.name}</p>
           <p className="text-sm text-stone-600">{ROLE_LABELS[auth.role]}</p>
         </div>
-        <LogoutButton />
+        <div className="flex items-center gap-2">
+          {auth.role === "MANAGER" && (
+            <Link href="/kitchen" className="rounded-lg border border-stone-300 px-3 py-2 text-sm">آشپزخانه</Link>
+          )}
+          <LogoutButton />
+        </div>
       </header>
       <FloorView />
     </main>

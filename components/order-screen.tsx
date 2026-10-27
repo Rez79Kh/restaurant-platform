@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ConnectionBanner } from "@/components/connection-banner";
+import { LineActionStatus } from "@/components/line-action-status";
 import { api, ApiError, newIdempotencyKey } from "@/lib/client/api";
 import type { Line, Menu, OrderView } from "@/lib/client/types";
+import { useLineActions, type LineAction } from "@/lib/client/use-line-actions";
 import { useLiveData } from "@/lib/client/use-live-data";
 import { formatClock, formatLabel, formatNumber, formatToman, LINE_STATUS_LABELS } from "@/lib/format";
 
@@ -29,6 +31,7 @@ export function OrderScreen({ orderId }: { orderId: string }) {
     load,
     (c) => c.orders.some((o) => o.id === orderId) || c.lines.some((l) => l.orderId === orderId),
   );
+  const lineActions = useLineActions(reload);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -95,7 +98,16 @@ export function OrderScreen({ orderId }: { orderId: string }) {
 
       <section className="flex flex-col gap-2">
         {lines.length === 0 && <p className="text-stone-500">هنوز آیتمی ثبت نشده است.</p>}
-        {lines.map((line) => <LineRow key={line.id} line={line} />)}
+        {lines.map((line) => (
+          <LineRow
+            key={line.id}
+            line={line}
+            action={lineActions.actions[line.id]}
+            onServe={isOpen ? () => lineActions.move(line.id, "READY", "SERVED") : undefined}
+            onRetry={() => lineActions.retry(line.id)}
+            onDismiss={() => lineActions.dismiss(line.id)}
+          />
+        ))}
       </section>
 
       <section className="flex flex-col gap-1 rounded-xl bg-white p-3 text-sm">
@@ -193,21 +205,47 @@ function toggleNote(current: string, note: string): string {
   return next.join("، ").slice(0, 120);
 }
 
-function LineRow({ line }: { line: Line }) {
+function LineRow({
+  line,
+  action,
+  onServe,
+  onRetry,
+  onDismiss,
+}: {
+  line: Line;
+  action: LineAction | undefined;
+  onServe?: () => void;
+  onRetry: () => void;
+  onDismiss: () => void;
+}) {
   return (
-    <div className="flex items-center justify-between gap-2 rounded-lg bg-white p-3">
-      <div className="flex flex-col">
-        <span className={line.status === "VOID" ? "line-through text-stone-400" : ""}>
-          {line.name} × {formatNumber(line.quantity)}
-        </span>
-        {line.note && <span className="text-sm text-stone-500">{line.note}</span>}
+    <div className="rounded-lg bg-white p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-col">
+          <span className={line.status === "VOID" ? "line-through text-stone-400" : ""}>
+            {line.name} × {formatNumber(line.quantity)}
+          </span>
+          {line.note && <span className="text-sm text-stone-500">{line.note}</span>}
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <span className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLE[line.status]}`}>
+            {LINE_STATUS_LABELS[line.status]}
+          </span>
+          {line.unitPriceToman !== undefined && (
+            <span className="text-xs text-stone-500">{formatToman(line.unitPriceToman * line.quantity)}</span>
+          )}
+          {line.status === "READY" && onServe && (
+            <button
+              onClick={onServe}
+              disabled={action?.status === "pending"}
+              className="min-h-11 rounded-lg bg-green-700 px-4 font-bold text-white disabled:opacity-50"
+            >
+              {action?.status === "pending" ? "…" : "سرو شد"}
+            </button>
+          )}
+        </div>
       </div>
-      <div className="flex flex-col items-end gap-1">
-        <span className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLE[line.status]}`}>{LINE_STATUS_LABELS[line.status]}</span>
-        {line.unitPriceToman !== undefined && (
-          <span className="text-xs text-stone-500">{formatToman(line.unitPriceToman * line.quantity)}</span>
-        )}
-      </div>
+      <LineActionStatus action={action} onRetry={onRetry} onDismiss={onDismiss} />
     </div>
   );
 }
