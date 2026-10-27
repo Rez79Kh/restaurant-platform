@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
-import { TEST_DIRECT_URL } from "./test-env";
+import { hashPin } from "@/lib/pin";
+import { TEST_DIRECT_URL, TEST_PIN_PEPPER } from "./test-env";
+
+const randomPhone = () => `0912${Math.floor(Math.random() * 1e7).toString().padStart(7, "0")}`;
+
+/** PINs of the fixture staff, by role. */
+export const FIXTURE_PINS = { MANAGER: "1234", STAFF: "2222", KITCHEN: "3333" } as const;
 
 /**
  * Owner connection for arranging fixtures. Locally (and in CI) the owner is a
@@ -22,16 +28,22 @@ export async function createTenant(owner: PrismaClient, label: string) {
   });
   const restaurantId = restaurant.id;
   const branch = await owner.branch.create({ data: { restaurantId, name: "Main" } });
-  const staff = await owner.staffMember.create({
-    data: {
-      restaurantId,
-      branchId: branch.id,
-      name: `Manager ${label}`,
-      phone: `0912${Math.floor(Math.random() * 1e7).toString().padStart(7, "0")}`,
-      pinHash: "not-a-real-hash",
-      role: "MANAGER",
-    },
-  });
+  const people = {} as Record<keyof typeof FIXTURE_PINS, { id: string; phone: string; pin: string }>;
+  for (const role of ["MANAGER", "STAFF", "KITCHEN"] as const) {
+    const pin = FIXTURE_PINS[role];
+    const member = await owner.staffMember.create({
+      data: {
+        restaurantId,
+        branchId: branch.id,
+        name: `${role} ${label}`,
+        phone: randomPhone(),
+        pinHash: await hashPin(pin, TEST_PIN_PEPPER),
+        role,
+      },
+    });
+    people[role] = { id: member.id, phone: member.phone, pin };
+  }
+  const staff = { id: people.MANAGER.id };
   const category = await owner.menuCategory.create({ data: { restaurantId, name: "Drinks" } });
   const menuItem = await owner.menuItem.create({
     data: { restaurantId, categoryId: category.id, name: "Latte", priceToman: 95_000 },
@@ -55,6 +67,8 @@ export async function createTenant(owner: PrismaClient, label: string) {
   });
   return {
     restaurantId,
+    slug: restaurant.slug,
+    people,
     branchId: branch.id,
     staffId: staff.id,
     categoryId: category.id,

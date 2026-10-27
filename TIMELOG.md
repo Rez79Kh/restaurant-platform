@@ -12,6 +12,7 @@ written during the work, not afterwards. Entries line up with the commit history
 | 1405/08/05 | 18:15 | 18:50 | 0:35 | Phase 3: domain schema, RLS tenant isolation, isolation tests |
 | 1405/08/05 | 18:50 | 19:00 | 0:10 | Vercel + Neon connected; live URL checked from Iran without VPN |
 | 1405/08/05 | 19:00 | 19:40 | 0:40 | Phase 4: seed data, bill calculation, PIN hashing with pepper (bill calc moved here from Phase 8; pepper added after review) |
+| 1405/08/05 | 19:40 | 20:10 | 0:30 | Phase 5: login, sessions, rate limiting, requireRole, auth tests |
 
-**Total so far:** 3:15 / 6:00
+**Total so far:** 3:45 / 6:00
 **Overrun:** none so far

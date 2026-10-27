@@ -210,3 +210,52 @@ Scratch file. Source material for DECISIONS.md later; not a final document.
 - **Local values** in `.env.example` / compose are dev-only placeholders,
   like the local DB passwords. Production gets a fresh random value
   (`openssl rand -base64 32`), set in Vercel and in the shell that seeds Neon.
+
+## Phase 5 — Auth & roles
+
+- **Pre-tenant lookups via two SECURITY DEFINER functions** owned by a
+  NOLOGIN role `app_auth`: `auth_find_staff(slug, phone)` and
+  `auth_find_session(token_hash)`. These are the only ways across the tenant
+  boundary. `app_auth` reads three tables through RLS policies scoped
+  `TO app_auth`. It doesn't rely on the owner bypassing RLS (the local
+  superuser does, Neon's owner doesn't), and `app_user` can execute the
+  functions but cannot `SET ROLE app_auth` (verified). Migration is
+  idempotent and covered by the run-twice test.
+- **Sessions**: 32 random bytes (base64url) in an `HttpOnly; SameSite=Lax`
+  cookie; only the SHA-256 is stored. Fixed 12-hour lifetime, not sliding: a
+  lost phone stops working by the next day. **Secure is set when the
+  request is HTTPS** (always on Vercel), not on plain-HTTP localhost, where
+  Safari would drop a Secure cookie. Deactivating staff ends their sessions
+  immediately (the lookup joins `is_active`).
+- **Rate limiting in Postgres** (`login_attempts`): 5 failures per
+  restaurant+phone since that account's last success, and 20 failures per
+  IP, within 15 minutes → 429. Phones are stored as an HMAC (keyed with
+  PIN_PEPPER), never raw. Known gaps: a concurrent burst can slightly exceed
+  the limit (count, then insert); no cleanup job for old attempts or expired
+  sessions yet.
+- **No account enumeration**: wrong PIN, unknown phone, unknown restaurant and
+  inactive staff all return the same 401 body, and an unknown account still
+  runs one scrypt against a dummy hash so timing doesn't tell them apart.
+- **Failed logins**: every failure logged at warn (phone masked). Failures
+  for a known staff member are also audit-logged in their restaurant.
+  Unknown-restaurant failures can only be logged (no tenant to audit into).
+- **Persian and Arabic-Indic digits accepted** in phone and PIN, plus
+  spaces, dashes and a +98/0098 prefix. Iranian phone keyboards often type
+  Persian digits.
+- **`requireRole({ req, log }, ...roles)`** is the single check in route
+  handlers: 401 without a session, 403 for the wrong role (both logged at warn
+  by the wrapper). It binds restaurant_id/staff_id/role to the request log.
+  The restaurant comes only from the session (tested with a spoofed header
+  and query param).
+- **Pages**: `requirePageSession()` redirects to /login. Plain UI: login
+  form (restaurant code remembered in localStorage), placeholder home with
+  logout.
+- **Login and logout carry no idempotency key**: a retried login only
+  creates a second session; logout is naturally idempotent.
+- **CSRF**: SameSite=Lax means cross-site POSTs carry no session cookie. The
+  APIs take JSON bodies. No CSRF token in v1.
+- **The seed and password scripts print the target host/database.** Missing
+  variables fall back to `.env`, so a run meant for Neon that forgot
+  `DIRECT_URL` would otherwise write to localhost without saying so.
+- **Role tests for discount, settle and kitchen price visibility** come with
+  those endpoints (Phases 7–8). Phase 5 tests the mechanism.

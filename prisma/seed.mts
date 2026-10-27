@@ -37,6 +37,10 @@ if (pinPepper.length < 32) {
   process.exit(1);
 }
 const reset = process.argv.includes("--reset");
+// Missing variables are filled from .env, so say where we're writing: a run
+// meant for Neon that forgot DIRECT_URL would otherwise seed localhost.
+const target = new URL(directUrl);
+console.log(`Seeding ${target.host}${target.pathname}${reset ? " (--reset)" : ""}`);
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: directUrl }) });
 
 type Tx = Prisma.TransactionClient;

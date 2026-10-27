@@ -20,6 +20,8 @@ if (!directUrl) {
   process.exit(1);
 }
 
+const target = new URL(directUrl);
+console.log(`Setting the app_user password on ${target.host}${target.pathname}`);
 const client = new pg.Client({ connectionString: directUrl });
 await client.connect();
 try {

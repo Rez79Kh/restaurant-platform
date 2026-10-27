@@ -91,16 +91,15 @@ describe("schema invariants", () => {
     }
   });
 
-  it("the role and RLS migration is safe to run twice", async () => {
-    const sql = readFileSync(
-      "prisma/migrations/20261027150100_app_user_and_rls/migration.sql",
-      "utf8",
-    );
+  it("the role, RLS and auth-lookup migrations are safe to run twice", async () => {
     const client = new pg.Client({ connectionString: TEST_DIRECT_URL });
     await client.connect();
     try {
-      await client.query(sql);
-      await client.query(sql);
+      for (const name of ["20261027150100_app_user_and_rls", "20261027170000_auth_lookup"]) {
+        const sql = readFileSync(`prisma/migrations/${name}/migration.sql`, "utf8");
+        await client.query(sql);
+        await client.query(sql);
+      }
     } finally {
       await client.end();
     }

@@ -22,7 +22,10 @@ not collide with a Postgres you may already run. Override with
 
 ### Demo logins
 
-Log in with restaurant slug + phone + PIN. Demo PINs only: never reuse in production.
+Log in at `/login` with the restaurant code (slug), phone and PIN. Persian
+digits are accepted. Demo PINs only: never reuse in production. The demo
+data's PINs verify only with the `PIN_PEPPER` the seed ran with (the local
+placeholder in `.env.example`). After changing it, run `npm run db:reseed`.
 
 **کافه نارنج** (Shiraz café), slug `cafe-narenj`: a week of history, 5 open orders
 
