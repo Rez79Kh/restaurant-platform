@@ -18,6 +18,7 @@ written during the work, not afterwards. Entries line up with the commit history
 | 1405/08/05 | 21:35 | 22:20 | 0:45 | Phase 8: discounts, voids, split payments, settle transaction, checkout tests; manual UI check |
 | 1405/08/05 | 22:20 | 22:35 | 0:15 | Phase 9: full-workflow test, README testing section |
 | 1405/08/05 | 22:35 | 23:10 | 0:35 | Phase 10: AI menu import (draft → review → confirm), validation, fallback, tests; manual check with a real menu photo |
+| 1405/08/05 | 23:10 | 23:45 | 0:35 | Phase 11: production hardening (startup guard, security headers, log fixes, README); production database setup on Neon |
 
-**Total so far:** 6:45 / 6:00
-**Overrun:** 0:45 - Phase 6 (ordering screens and concurrency tests) ran over its estimate; the bill calculation and PIN pepper were added during Phase 4; a local Docker disk failure cost time during Phase 5.
+**Total so far:** 7:20 / 6:00
+**Overrun:** 1:20 - Phase 6 (ordering screens and concurrency tests) ran over its estimate; the bill calculation and PIN pepper were added during Phase 4; a local Docker disk failure cost time during Phase 5.

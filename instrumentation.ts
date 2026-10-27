@@ -4,5 +4,7 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { getEnv } = await import("./lib/env");
     getEnv();
+    const { assertSafeRuntimeRole } = await import("./lib/runtime-role");
+    await assertSafeRuntimeRole();
   }
 }

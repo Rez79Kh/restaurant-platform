@@ -20,6 +20,11 @@ The compose Postgres is published on host port **5433** (not 5432) so it does
 not collide with a Postgres you may already run. Override with
 `POSTGRES_PORT=5434 docker compose up --build`.
 
+Migrations run as `migrator`, a non-superuser database owner like Neon's,
+created by [docker/postgres-init.sql](docker/postgres-init.sql) when the
+volume is first created. If you have a volume from before that role existed,
+recreate it once (demo data only): `docker compose down -v`.
+
 ### Demo logins
 
 Log in at `/login` with the restaurant code (slug), phone and PIN. Persian
@@ -89,16 +94,72 @@ The environment is validated at server start; a missing or invalid variable
 stops the server with a message naming the variable (never its value).
 
 - `DATABASE_URL` — the app's runtime connection (production: Neon **pooled**, as `app_user`).
-- `DIRECT_URL` — migrations only (production: Neon **direct**, as the owner).
+- `DIRECT_URL` — migrations only (production: Neon **direct**, as the owner;
+  locally `migrator`, a non-superuser owner, so migrations hit the same
+  permission checks as on Neon).
 - `APP_DB_PASSWORD` — applied to `app_user` by `npm run db:setup`; never stored in a migration.
+- `PIN_PEPPER` — secret HMAC key for PINs (≥ 32 chars). The seed and the app must use the same value.
+- `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL` — menu import from a photo. Optional: without them, menu items are entered by hand.
 
-The app must connect as `app_user` (not a superuser, not the table owner):
-Postgres superusers and table owners bypass Row-Level Security. An
-integration test fails if the runtime connection is misconfigured.
+The app must connect as `app_user`. Superusers and roles with BYPASSRLS
+ignore Row-Level Security even with FORCE, so the server **refuses to start**
+if `DATABASE_URL` is such a role (it logs `fatal` and names it), and an
+integration test checks that the runtime role is neither of those and owns
+no tables.
 
 ## Architecture
 
-_To be written (Phase 11)._
+```
+Phones and a kitchen tablet: Persian RTL UI (Next.js App Router)
+  │  JSON over HTTPS · every mutation carries an Idempotency-Key
+  │  polls GET /api/changes every 2.5 s (paused while the tab is hidden)
+  ▼
+Route Handlers on Vercel (fra1, Node runtime)
+  route()          request id, timing, one JSON log line, { error: { code, message } }
+  requireRole()    session cookie → auth_find_session() → role check (401 / 403)
+  withTenant()     BEGIN; set_config('app.restaurant_id', <from session>, true); …
+  idempotent()     key stored in the same transaction; retries replay the response
+  ▼
+Neon Postgres (Frankfurt) through the pooler, as app_user
+  RLS (ENABLE + FORCE) · composite FKs · CHECKs · one-open-order index · triggers
+
+Menu import only: POST /api/menu-imports → OpenAI-compatible AI gateway (server-side)
+```
+
+**The one workflow** (SCOPE §4), in API calls:
+
+| Step | Endpoint | How it stays correct under concurrency |
+|---|---|---|
+| Open a table | `POST /api/orders` | Partial unique index: one OPEN order per table; the loser gets 409 and the existing order |
+| Add items | `POST /api/orders/:id/lines` | INSERT only, never rewrites the order; `FOR SHARE` on the order; menu name and price snapshotted |
+| Kitchen and waiter move items | `POST /api/order-lines/:id/status` | `UPDATE … WHERE id = $1 AND status = $from`; 0 rows → 409 with the current state |
+| Discount, cancel order | `POST /api/orders/:id/discount`, `…/void` | `FOR UPDATE` + client's `version`; stale → 409; audited |
+| Void an item | `POST /api/order-lines/:id/void` | Conditional like any status change; staff before the kitchen starts, manager after; audited |
+| Settle | `POST /api/orders/:id/settle` | One transaction: lock, check version, recompute the bill after the lock, payments = total to the Toman, snapshot totals; audited |
+| Live screens | `GET /api/changes?since=` | DB-clock cursor with a 10 s overlap; clients reload their snapshot on any change |
+
+**Money**: integer Toman everywhere. One pure function (`lib/bill.ts`):
+subtotal → discount → service charge → VAT, rounding half-up to a whole Toman
+at each step. A settled order stores its totals, so history never changes.
+
+**Roles** are checked on the server in every handler. Staff open orders,
+add, serve, void unstarted items and settle. Managers do everything,
+including discounts, voids after the kitchen starts and the menu import.
+Kitchen sees tickets and moves items to preparing and ready, and never
+receives a price from any endpoint.
+
+**Where things live**
+
+| Path | What |
+|---|---|
+| `app/api/**/route.ts` | REST endpoints: validation (Zod), role check, then one transaction |
+| `app/**/page.tsx`, `components/` | Plain UI: login, tables grid, order screen, kitchen board, menu import |
+| `lib/tenant.ts`, `lib/auth/`, `lib/idempotency.ts`, `lib/orders/` | The rules: isolation, sessions and rate limits, idempotency, locking and views |
+| `lib/bill.ts`, `lib/pin.ts`, `lib/ai/` | Pure money calculation, PIN hashing, menu extraction and price checks |
+| `prisma/schema.prisma`, `prisma/migrations/` | Schema; raw SQL for integrity rules, the `app_user` role, RLS and the two pre-login lookups |
+| `tests/integration/` | Real Postgres, real handlers: isolation, auth, ordering, kitchen, checkout, menu import, full workflow |
+
+Decisions and trade-offs, with reasons, are logged in [NOTES.md](NOTES.md).
 
 ### Tenant isolation (three independent layers)
 
@@ -116,7 +177,7 @@ Tests in `tests/integration/isolation.test.ts` exercise each layer separately.
 
 ```bash
 docker compose up -d db   # integration tests need the compose Postgres
-npm test                  # 135 tests: 41 unit + 94 integration, about 10 s
+npm test                  # 136 tests: 41 unit + 95 integration, about 10 s
 ```
 
 Integration tests run against a real Postgres (a separate `restaurant_test`
@@ -165,4 +226,66 @@ table's check from opening to the settled, split-paid, discounted bill.
 
 ## Deployment
 
-_To be written (Phase 11): Vercel (fra1) + Neon (Frankfurt)._
+Production runs on **Vercel** (functions in `fra1`, Frankfurt, set in
+[vercel.json](vercel.json)) and **Neon Postgres** in Frankfurt, deployed from
+GitHub by Vercel. Same region keeps every database round trip short.
+
+### First-time setup
+
+1. **Neon**: create a project in *AWS Europe Central 1 (Frankfurt)*. From
+   the dashboard, copy two connection strings for the owner role:
+   *direct*, and *pooled* (host contains `-pooler`).
+2. **Vercel environment variables** (Production):
+
+   | Variable | Value |
+   |---|---|
+   | `DIRECT_URL` | Neon **direct** string, **owner** role. Used only by migrations during the build |
+   | `DATABASE_URL` | Neon **pooled** string with the user and password swapped for `app_user` (keep `sslmode=require`) |
+   | `PIN_PEPPER` | `openssl rand -base64 32`. Keep a copy: the seed needs the same value |
+   | `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL` | The AI gateway (optional) |
+   | `LOG_LEVEL` | `info` |
+
+3. **Deploy.** The build command (`vercel.json`) runs `prisma migrate
+   deploy` before `next build`. The migrations create the `app_user` role,
+   RLS policies and auth functions.
+4. **Set the `app_user` password once**, from your machine (it prints which
+   database it's writing to, never the password):
+   ```bash
+   DIRECT_URL='<neon direct, owner>' APP_DB_PASSWORD='<password>' node scripts/set-app-db-password.mts
+   ```
+   Use the same password in `DATABASE_URL`, then redeploy.
+5. **Demo data** (once): `DIRECT_URL='<neon direct>' PIN_PEPPER='<same as Vercel>' npm run db:seed`.
+   If a migration ever fails on Neon (Prisma `P3018`), fix it, then mark it
+   rolled back and re-run setup. The RLS and auth migrations are idempotent,
+   so a re-run is safe:
+   ```bash
+   npx prisma migrate status        # prints the target host; check it is Neon
+   npx prisma migrate resolve --rolled-back <migration_name>
+   npm run db:setup                 # migrate deploy + app_user password + seed
+   ```
+6. **Smoke check**: `/api/health` returns `{"status":"ok"}`; log in as each
+   demo role. If `DATABASE_URL` points at the owner by mistake, the server
+   refuses to start and the Vercel logs show a `fatal` line naming the role.
+
+### Every deploy
+
+- **Migrations run in the build, before the new code serves traffic.**
+  They must therefore work with the version still running: add first, remove
+  in a later deploy (expand → contract).
+- **Preview deployments must use a Neon branch**, never production
+  credentials, or a preview build would migrate the production database.
+- **Pooling**: Neon's pooler is PgBouncer in transaction mode. The tenant
+  setting is transaction-local (`set_config(…, true)`), so it can't leak
+  between requests that share a connection.
+- **Function limits**: menu import declares `maxDuration = 60` (two AI
+  attempts of 20 s). Uploads are capped at 4 MB, under Vercel's 4.5 MB
+  request limit.
+
+### Known operational gaps (v1)
+
+- No cleanup jobs yet for `login_attempts`, `idempotency_records` and
+  expired `sessions`. A daily Vercel Cron would do it.
+- Backups: rely on Neon's point-in-time restore. No separate export.
+- Hosted outside Iran (SCOPE §11): if international connectivity is cut, the
+  app is unreachable. Moving hosting into Iran is the first fix if that
+  becomes real.

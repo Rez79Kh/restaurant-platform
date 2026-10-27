@@ -463,3 +463,80 @@ Scratch file. Source material for DECISIONS.md later; not a final document.
   117 completion tokens, $0.0039. All 5 items and both categories read and
   scaled from thousands. **One price misread (فالوده ۱۳۰ → 120)**: the
   review step exists for exactly this.
+
+## Phase 11 — Production hardening
+
+- **`vercel.json`**: functions in `fra1` (Frankfurt, next to Neon), and
+  build command `npm run db:deploy && npm run build`. Migrations run before
+  the new code serves, so they must be backward-compatible (expand →
+  contract). Preview deployments must point at a Neon branch, or a preview
+  build migrates production. The Docker build is unaffected (it migrates at
+  container start).
+- **Startup guard** (`lib/runtime-role.ts`, called from `instrumentation.ts`):
+  if the runtime role is a superuser or has BYPASSRLS, the server logs
+  `fatal` and refuses to start. FORCE RLS covers a table owner, but nothing
+  covers those two. An unreachable DB at boot is logged, not fatal (health
+  reports it). Verified live: `next start` with the superuser URL → fatal
+  log, every request 500, no data served.
+- **Security headers** on every response: CSP without nonces (`'self'`
+  plus `'unsafe-inline'` for Next's inline hydration scripts). Nonces would
+  force per-request rendering and we render no user HTML, so this is an
+  accepted trade-off. No `upgrade-insecure-requests`, because it would break
+  the plain-HTTP Docker setup; HSTS covers HTTPS on Vercel. Also HSTS,
+  nosniff, `X-Frame-Options: DENY` plus `frame-ancestors 'none'`,
+  Referrer-Policy, and a Permissions-Policy denying camera, mic, geolocation
+  and payment (the menu photo uses a file input, not getUserMedia).
+  Verified: no external scripts; the self-hosted font loads.
+- **Final log review**:
+  - Every request line has request_id, restaurant/staff/role (after
+    auth), route, status, duration and error_code.
+  - 401/403/409/429 are logged at warn; AI calls log tokens and cost.
+  - Fixed: the masked phone was logged under the redacted key `phone` and
+    came out as `[REDACTED]`. It is now `phone_masked`.
+  - Fixed: Prisma `errorFormat: "minimal"`, so error messages never echo a
+    query's arguments (tenant data) into logs.
+  - Accepted: client IPs are logged for login security.
+- **README**:
+  - Architecture: diagram, the workflow as API calls with the concurrency
+    guarantee per step, money, roles, code map.
+  - Deployment: first-time Neon and Vercel setup, the password step, seeding
+    with the same pepper, per-deploy rules, known operational gaps.
+  - Configuration: corrected (table owners are covered by FORCE; superuser
+    and BYPASSRLS are the real risks).
+
+## Fix after Phase 11: migrations as a non-superuser owner
+
+- **Bug:** `npm run db:setup` on Neon failed at `20261027170000_auth_lookup`
+  with `permission denied for schema public` (42501, P3018). `ALTER FUNCTION
+  ... OWNER TO app_auth` needs the new owner to have CREATE on the schema
+  (and the caller to be able to SET ROLE to it). Superusers skip both
+  checks; Neon's `neondb_owner` is not a superuser. Every local and test run
+  migrated as the `postgres` superuser, so this never showed up.
+- **Fix:** grant `app_auth` CREATE on `public` just for the ownership change,
+  then revoke it. The `GRANT app_auth TO CURRENT_USER` already covered SET ROLE.
+- **Edited the migration rather than adding a new one.** A failed migration
+  blocks every later one, so a follow-up migration can't repair it: the only
+  way would be to `resolve --applied` a migration that never ran, which makes
+  the history lie. The migration had never succeeded anywhere except
+  superuser dev and test DBs, which are disposable. On a superuser DB the edited version produces the
+  same end state. Cost: existing local DBs carry the old checksum, so
+  recreate the volume once (`docker compose down -v`).
+- **Neon recovery:** `prisma migrate resolve --rolled-back
+  20261027170000_auth_lookup`, then `npm run db:setup`. Postgres ran the
+  failed script atomically, and the migration is idempotent anyway.
+  Rehearsed on a fresh database: old migration → P3018/42501 → resolve →
+  setup succeeds; `app_user` logs in through the auth functions and sees
+  0 orders without tenant context.
+- **Local now matches production:** `docker/postgres-init.sql` creates
+  `migrator` (NOSUPERUSER, CREATEDB for Prisma's shadow DB, CREATEROLE,
+  NOBYPASSRLS) and makes it the owner of both databases. Compose,
+  `.env.example` and the integration tests migrate as `migrator`. Fixtures
+  still use the `postgres` superuser (`TEST_SUPERUSER_URL`), since they
+  must write across tenants. A new test asserts the migration role is
+  neither a superuser nor BYPASSRLS, so this can't regress silently.
+  Results: 137 tests pass against a fresh volume; `db:setup` and
+  `db:reseed` work as `migrator`.
+- **Remaining gap:** `migrator` approximates Neon's owner; it isn't
+  identical. Neon's role is a member of `neon_superuser` and may have other
+  attributes. A Neon branch in CI would be the faithful test, but it isn't set up.
+

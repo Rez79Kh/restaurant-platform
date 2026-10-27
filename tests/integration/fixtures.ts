@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 import { hashPin } from "@/lib/pin";
-import { TEST_DIRECT_URL, TEST_PIN_PEPPER } from "./test-env";
+import { TEST_PIN_PEPPER, TEST_SUPERUSER_URL } from "./test-env";
 
 const randomPhone = () => `0912${Math.floor(Math.random() * 1e7).toString().padStart(7, "0")}`;
 
@@ -10,12 +10,12 @@ const randomPhone = () => `0912${Math.floor(Math.random() * 1e7).toString().padS
 export const FIXTURE_PINS = { MANAGER: "1234", STAFF: "2222", KITCHEN: "3333" } as const;
 
 /**
- * Owner connection for arranging fixtures. Locally (and in CI) the owner is a
- * superuser, so RLS does not apply to it. Never use it to assert behaviour:
- * assertions go through the app's runtime connection (app_user).
+ * Superuser connection for arranging fixtures across tenants (RLS does not
+ * apply to it). Never use it to assert behaviour: assertions go through the
+ * app's runtime connection (app_user).
  */
 export function ownerDb(): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString: TEST_DIRECT_URL }) });
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString: TEST_SUPERUSER_URL }) });
 }
 
 export type TenantFixture = Awaited<ReturnType<typeof createTenant>>;

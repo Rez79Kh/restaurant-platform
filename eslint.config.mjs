@@ -11,7 +11,7 @@ const eslintConfig = defineConfig([
   {
     files: ["**/*.ts", "**/*.tsx"],
     // lib/auth: the two pre-tenant lookups and the login_attempts table.
-    ignores: ["lib/db.ts", "lib/tenant.ts", "lib/auth/**", "app/api/health/route.ts", "tests/**"],
+    ignores: ["lib/db.ts", "lib/tenant.ts", "lib/auth/**", "lib/runtime-role.ts", "app/api/health/route.ts", "tests/**"],
     rules: {
       "no-restricted-imports": [
         "error",

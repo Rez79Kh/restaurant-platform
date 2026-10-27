@@ -15,7 +15,9 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 export function db(): PrismaClient {
   if (!globalForPrisma.prisma) {
     const adapter = new PrismaPg({ connectionString: getEnv().DATABASE_URL });
-    globalForPrisma.prisma = new PrismaClient({ adapter });
+    // "minimal": error messages without the call's arguments, so a failed
+    // query never copies tenant data (a phone, a name) into the logs.
+    globalForPrisma.prisma = new PrismaClient({ adapter, errorFormat: "minimal" });
   }
   return globalForPrisma.prisma;
 }

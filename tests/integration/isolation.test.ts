@@ -3,6 +3,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
+import { assertSafeRuntimeRole } from "@/lib/runtime-role";
 import { withTenant } from "@/lib/tenant";
 import { createTenant, ownerDb, type TenantFixture } from "./fixtures";
 import { TEST_DATABASE_URL, TEST_DIRECT_URL } from "./test-env";
@@ -59,6 +60,12 @@ describe("runtime connection", () => {
     expect(row).toEqual({ user: "app_user", rolsuper: false, rolbypassrls: false, owned: 0 });
   });
 
+  it("the startup guard accepts app_user and refuses a role that bypasses RLS", async () => {
+    await expect(assertSafeRuntimeRole(db())).resolves.toBeUndefined();
+    // The fixture connection is the local superuser: exactly the misconfiguration to catch.
+    await expect(assertSafeRuntimeRole(owner)).rejects.toThrow(/bypasses row-level security/);
+  });
+
   it("cannot update or delete the audit log", async () => {
     await expect(
       withTenant(a.restaurantId, (tx) => tx.$executeRaw`DELETE FROM audit_events`),
@@ -88,6 +95,21 @@ describe("schema invariants", () => {
     for (const row of rows) {
       expect(row, row.table).toMatchObject({ enabled: true, forced: true });
       expect(row.policies, row.table).toBeGreaterThan(0);
+    }
+  });
+
+  it("migrations run as a non-superuser owner, like Neon's", async () => {
+    // Superusers skip permission checks; a migration that needs them must fail
+    // here, not on the production deploy.
+    const client = new pg.Client({ connectionString: TEST_DIRECT_URL });
+    await client.connect();
+    try {
+      const { rows } = await client.query(
+        "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user",
+      );
+      expect(rows[0]).toEqual({ rolsuper: false, rolbypassrls: false });
+    } finally {
+      await client.end();
     }
   });
 

@@ -20,8 +20,13 @@ BEGIN
 END
 $$;
 
--- Needed to hand function ownership to app_auth (Neon's owner is not a superuser).
+-- Handing a function to app_auth (ALTER ... OWNER TO, below) needs two things
+-- a non-superuser owner like Neon's doesn't have by default: membership in
+-- app_auth (to SET ROLE to it), and CREATE on the schema for app_auth.
+-- Superusers skip both checks, which is how this once passed only locally.
+-- CREATE is granted just for the ownership change and revoked right after.
 GRANT app_auth TO CURRENT_USER;
+GRANT CREATE ON SCHEMA public TO app_auth;
 
 GRANT USAGE ON SCHEMA public TO app_auth;
 GRANT SELECT ON "restaurants", "staff_members", "sessions" TO app_auth;
@@ -58,6 +63,7 @@ $$;
 
 ALTER FUNCTION auth_find_staff(text, text) OWNER TO app_auth;
 ALTER FUNCTION auth_find_session(text) OWNER TO app_auth;
+REVOKE CREATE ON SCHEMA public FROM app_auth;
 REVOKE ALL ON FUNCTION auth_find_staff(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION auth_find_session(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION auth_find_staff(text, text) TO app_user;

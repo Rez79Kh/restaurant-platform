@@ -32,7 +32,8 @@ export async function login(input: LoginInput, log: Logger): Promise<LoginResult
   const { slug, phone, pin, ip } = input;
   // Phones are stored only as a keyed hash here (no tenant, no RLS on this table).
   const phoneHash = createHmac("sha256", PIN_PEPPER).update(`login:${slug}:${phone}`).digest("hex");
-  const logFields = { slug, phone: maskPhone(phone), ip };
+  // "phone" is a redacted log key; the masked form goes under its own name.
+  const logFields = { slug, phone_masked: maskPhone(phone), ip };
 
   const [counts] = await db().$queryRaw<{ account: number; ip: number }[]>`
     SELECT
