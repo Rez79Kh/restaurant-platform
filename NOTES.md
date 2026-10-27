@@ -344,3 +344,45 @@ Scratch file. Source material for DECISIONS.md later; not a final document.
   kitchen tests now cover that query.
 - **Not built**: per-station routing (bar vs kitchen), "start all" on a
   ticket, sound alerts for new tickets. All candidates after v1.
+
+## Phase 8 — Checkout
+
+- **Locking design**: order-level changes (discount, settle, cancel order)
+  lock the order `FOR UPDATE` and check the client's `version` (stale →
+  409 with the current version). Adds and line voids hold `FOR SHARE`. Settle
+  recomputes the bill from the lines after taking the lock. Result: a
+  settled snapshot always matches its lines, and nothing can be added to or
+  voided from a bill while it is being closed. **Verified by mutation**:
+  removing the void's `FOR SHARE` made the race test fail 4/4 (the settled
+  total still included the voided item).
+- **Payments are part of the settle request** (`{version, payments[]}`),
+  not recorded one by one. The split is built on screen and submitted once:
+  one transaction, one idempotency key, so a retry on weak Wi-Fi can't
+  double-record a payment. Payments must equal the recomputed total exactly
+  (to the Toman), else 422 `PAYMENT_MISMATCH` with both amounts. Trade-off:
+  no partial payment that stays recorded while the table keeps ordering (rare
+  in a café; would need a payments ledger on the open order).
+- **Settling with unserved items is allowed** (takeaway pays first) but the
+  UI warns. Zero-total bills (100% discount) settle with no payments.
+- **Discount**: manager only; versioned; audit has reason, before/after
+  type, value and Toman, and the new version. AMOUNT > subtotal or PERCENT >
+  100% → 422. Removing a discount needs a reason and is audited separately
+  (`order.discount_removed`). UI takes percent as "12.5" and sends basis points.
+- **Void line**: staff only for SENT (kitchen hasn't started); manager for
+  any billable status, including SERVED (complaints). Reason always required:
+  cheap for staff thanks to reason chips, and it makes the audit useful.
+  Conditional on the client's `from` status like any status change.
+- **Cancel order** is only for orders with nothing billable (all lines voided
+  or none). Staff can do it (wrong table), versioned and audited. Requiring
+  item-by-item voids first means cancelling an order can't hide what was served.
+- **Client key policy** (`useAction`): keep the idempotency key for retry
+  only when the outcome is unknown (network failure / 5xx); after a 4xx the
+  server answered, so the next attempt is a new request. Editing the inputs
+  always resets the key. After a 409/422 the order view reloads to show what
+  changed.
+- **Role tests now complete**: STAFF and KITCHEN cannot discount (403);
+  KITCHEN cannot settle (403); KITCHEN sees no prices (Phase 6/7); STAFF
+  cannot void past SENT (403).
+- **Not built**: receipts/printing (out of scope), change calculation for
+  cash tendered, refunds after settle, editing a settled bill. A settled bill
+  is final in v1.

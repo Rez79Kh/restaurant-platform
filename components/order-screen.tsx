@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ConnectionBanner } from "@/components/connection-banner";
 import { LineActionStatus } from "@/components/line-action-status";
+import { CancelOrderButton, canVoid, CheckoutPanel, DiscountPanel, VoidLineForm } from "@/components/order-actions";
 import { api, ApiError, newIdempotencyKey } from "@/lib/client/api";
 import type { Line, Menu, OrderView } from "@/lib/client/types";
 import { useLineActions, type LineAction } from "@/lib/client/use-line-actions";
@@ -25,7 +27,8 @@ const STATUS_STYLE: Record<string, string> = {
   VOID: "bg-red-100 text-red-800 line-through",
 };
 
-export function OrderScreen({ orderId }: { orderId: string }) {
+export function OrderScreen({ orderId, role }: { orderId: string; role: "MANAGER" | "STAFF" }) {
+  const router = useRouter();
   const load = useCallback(() => api<OrderView>(`/api/orders/${orderId}`), [orderId]);
   const { data, error, offline, reload } = useLiveData(
     load,
@@ -36,6 +39,8 @@ export function OrderScreen({ orderId }: { orderId: string }) {
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [send, setSend] = useState<Send>({ status: "idle", key: null });
+  const [checkout, setCheckout] = useState(false);
+  const [voiding, setVoiding] = useState<string | null>(null);
 
   useEffect(() => {
     api<Menu>("/api/menu")
@@ -106,6 +111,8 @@ export function OrderScreen({ orderId }: { orderId: string }) {
             onServe={isOpen ? () => lineActions.move(line.id, "READY", "SERVED") : undefined}
             onRetry={() => lineActions.retry(line.id)}
             onDismiss={() => lineActions.dismiss(line.id)}
+            onVoid={isOpen && canVoid(line, role) ? () => setVoiding(voiding === line.id ? null : line.id) : undefined}
+            voidForm={voiding === line.id ? <VoidLineForm line={line} onClose={() => setVoiding(null)} reload={reload} /> : null}
           />
         ))}
       </section>
@@ -117,6 +124,20 @@ export function OrderScreen({ orderId }: { orderId: string }) {
         <Row label="مالیات بر ارزش افزوده" value={formatToman(bill.vatToman)} />
         <Row label="مبلغ قابل پرداخت" value={formatToman(bill.totalToman)} strong />
       </section>
+
+      {isOpen && role === "MANAGER" && <DiscountPanel view={data} reload={reload} />}
+      {isOpen && lines.every((l) => l.status === "VOID") && (
+        <CancelOrderButton view={data} onCancelled={() => router.push("/")} reload={reload} />
+      )}
+      {isOpen && lines.some((l) => l.status !== "VOID") && cart.length === 0 && (
+        checkout ? (
+          <CheckoutPanel view={data} onSettled={() => router.push("/")} reload={reload} />
+        ) : (
+          <button onClick={() => setCheckout(true)} className="rounded-xl bg-green-700 py-3 text-lg font-bold text-white">
+            تسویه حساب
+          </button>
+        )
+      )}
 
       {isOpen && menu && (
         <section className="flex flex-col gap-3">
@@ -211,12 +232,16 @@ function LineRow({
   onServe,
   onRetry,
   onDismiss,
+  onVoid,
+  voidForm,
 }: {
   line: Line;
   action: LineAction | undefined;
   onServe?: () => void;
   onRetry: () => void;
   onDismiss: () => void;
+  onVoid?: () => void;
+  voidForm: React.ReactNode;
 }) {
   return (
     <div className="rounded-lg bg-white p-3">
@@ -243,9 +268,15 @@ function LineRow({
               {action?.status === "pending" ? "…" : "سرو شد"}
             </button>
           )}
+          {onVoid && (
+            <button onClick={onVoid} className="text-xs text-red-700 underline">
+              لغو
+            </button>
+          )}
         </div>
       </div>
       <LineActionStatus action={action} onRetry={onRetry} onDismiss={onDismiss} />
+      {voidForm}
     </div>
   );
 }
