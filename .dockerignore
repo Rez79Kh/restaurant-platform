@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+generated
+.env*
+!.env.example
+coverage
+*.md
+!README.md

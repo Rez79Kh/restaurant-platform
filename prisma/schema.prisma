@@ -1,0 +1,11 @@
+// Models are added in Phase 3 (schema & tenant isolation).
+// Connection URLs live in prisma.config.ts (CLI) and lib/db.ts (runtime).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
