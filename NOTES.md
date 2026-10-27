@@ -259,3 +259,52 @@ Scratch file. Source material for DECISIONS.md later; not a final document.
   `DIRECT_URL` would otherwise write to localhost without saying so.
 - **Role tests for discount, settle and kitchen price visibility** come with
   those endpoints (Phases 7–8). Phase 5 tests the mechanism.
+
+## Phase 6 — Ordering
+
+- **Idempotency helper** (`lib/idempotency.ts`): key from the
+  `Idempotency-Key` header, inserted with `ON CONFLICT DO NOTHING` in the
+  mutation's own transaction. A concurrent duplicate waits on the unique index
+  and then replays the stored response. Errors roll the key back, so only
+  successes are replayed. The route string includes the target id, so a key
+  reused for another order gets 422. Responses are JSON-normalised so the
+  original and the replay are identical. Tested: 5 identical requests at once
+  → applied once, one non-replayed response, all bodies equal.
+- **Adding items** is INSERT-only. The order row is locked `FOR SHARE`: adds
+  don't block each other, but settle (Phase 8, `FOR UPDATE`) can't interleave
+  with an add, so an item can't slip onto a bill that's being closed. Menu
+  name and price are snapshotted at insert; unavailable or other-tenant items
+  → 409 `MENU_ITEM_UNAVAILABLE`. Tested: 10 concurrent adds from two
+  sessions all persist.
+- **Opening a table**: pre-check for a friendlier 409 (with the existing
+  order id, so the UI jumps to it), and the partial unique index as the real
+  guarantee. Tested: two simultaneous opens → exactly one 201, one 409.
+- **Polling** (`/api/changes`): DB clock (`clock_timestamp()`, same as the
+  triggers) as the cursor, a 10 s overlap window for commit-order skew, and
+  `resync: true` when the cursor is missing, older than 5 min, or a result hits
+  the 300-row cap. **Clients treat changes as "reload my snapshot", never as
+  a diff to merge.** It costs one extra request per change, and in exchange
+  no screen can drift from the server. Cost and limits documented in the route.
+- **Polling pauses when the tab is hidden** and polls immediately on
+  return. A failed poll shows an "offline, data may be stale" banner. No
+  offline queue (out of scope).
+- **Kitchen gets no prices from any endpoint**: `lineView()` drops the price
+  for KITCHEN; kitchen can't call the order, menu or floor endpoints (403).
+  Tested by asserting the kitchen's changes payload contains no price/total
+  fields.
+- **API-level isolation tests** (signed-in user of B against A's ids): read
+  order → 404, add to A's order → 404, reference A's menu item → 409, open on
+  A's table → 404, and A's ids appear nowhere in B's floor/menu/changes.
+  Malformed ids → 404 (validated before reaching SQL).
+- **Weak connections**: every mutation in the UI has a visible
+  pending / failed state; the key is made once per user action and reused on
+  "retry", so a request that reached the server before the connection dropped
+  is not applied twice. Editing the cart after a failure makes a new request
+  (new key), because the body changed.
+- **UI is plain and mobile-first**: tables grid (free / occupied / ready
+  shown in green), takeaway list, order screen with category tabs, big tap
+  targets, cart with quick-note chips + free text, bill summary. Built and
+  server-rendered, but **not clicked through in a real browser** (no browser
+  tool available in this session).
+- **Branch**: every query is scoped to the session's branch as well as the
+  restaurant, even though v1 has one branch per restaurant.

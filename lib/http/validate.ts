@@ -1,5 +1,5 @@
-import type { z } from "zod";
-import { badRequest } from "./errors";
+import { z } from "zod";
+import { badRequest, notFound } from "./errors";
 
 /** Validates any input (params, query, parsed body) or throws a 400 VALIDATION_ERROR. */
 export function parseWith<S extends z.ZodType>(schema: S, input: unknown): z.infer<S> {
@@ -28,4 +28,13 @@ export async function parseBody<S extends z.ZodType>(req: Request, schema: S): P
     throw badRequest("بدنه درخواست JSON معتبر نیست.", undefined, "INVALID_JSON");
   }
   return parseWith(schema, raw);
+}
+
+const Uuid = z.uuid();
+
+/** A path id. Anything that isn't a UUID can't exist, so it's a 404, not a 400 or a DB cast error. */
+export function parseId(value: string | undefined): string {
+  const result = Uuid.safeParse(value);
+  if (!result.success) throw notFound();
+  return result.data;
 }
