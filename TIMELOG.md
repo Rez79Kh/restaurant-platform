@@ -21,4 +21,4 @@ written during the work, not afterwards. Entries line up with the commit history
 | 1405/08/05 | 23:10 | 23:45 | 0:35 | Phase 11: production hardening (startup guard, security headers, log fixes, README); production database setup on Neon |
 
 **Total so far:** 7:20 / 6:00
-**Overrun:** 1:20 - Phase 6 (ordering screens and concurrency tests) ran over its estimate; the bill calculation and PIN pepper were added during Phase 4; a local Docker disk failure cost time during Phase 5.
+**Overrun:** 1:20 - Phase 6 (ordering screens and concurrency tests) ran over its estimate; the bill calculation and PIN pepper were added during Phase 4; a local Docker disk failure cost time during Phase 5; in Phase 11 a migration that had only been tested as a superuser failed on Neon and had to be fixed, and exposed secrets had to be rotated.
