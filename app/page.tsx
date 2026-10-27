@@ -16,7 +16,10 @@ export default async function Home() {
         </div>
         <div className="flex items-center gap-2">
           {auth.role === "MANAGER" && (
-            <Link href="/kitchen" className="rounded-lg border border-stone-300 px-3 py-2 text-sm">آشپزخانه</Link>
+            <>
+              <Link href="/menu-import" className="rounded-lg border border-stone-300 px-3 py-2 text-sm">ورود منو</Link>
+              <Link href="/kitchen" className="rounded-lg border border-stone-300 px-3 py-2 text-sm">آشپزخانه</Link>
+            </>
           )}
           <LogoutButton />
         </div>

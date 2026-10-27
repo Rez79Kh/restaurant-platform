@@ -116,7 +116,7 @@ Tests in `tests/integration/isolation.test.ts` exercise each layer separately.
 
 ```bash
 docker compose up -d db   # integration tests need the compose Postgres
-npm test                  # 108 tests: 23 unit + 85 integration, about 10 s
+npm test                  # 135 tests: 41 unit + 94 integration, about 10 s
 ```
 
 Integration tests run against a real Postgres (a separate `restaurant_test`
@@ -159,6 +159,9 @@ table's check from opening to the settled, split-paid, discounted bill.
 | Cookie behaviour across browsers | Needs real browsers | Standard attributes; `Secure` only over HTTPS so Safari keeps the cookie on `http://localhost` |
 | Persian number and Jalali date formatting | Relies on the platform's ICU data (`Intl`), not our code | Checked visually |
 | "Under 10 minutes without training" | A usability claim, not a code property | To be checked with someone who has never seen the app |
+| How accurately the AI reads real menus | Model behaviour, not our code; tests use a fake gateway | One live smoke test (synthetic Persian menu, see NOTES.md): 5 of 5 items found, one price misread (۱۳۰ → ۱۲۰). This is why every row is reviewed before saving. Price sanity checks are unit-tested |
+| Prompt injection against the real model | Can't be proven with tests | Layered: the system prompt says image text is data; no tools; output must match a strict schema (extra fields dropped, anything else rejected); a manager confirms every row. The live smoke test's injected line was ignored |
+| Client-side photo shrinking | Browser canvas API | Falls back to the original file; the server enforces type (magic bytes) and size anyway |
 
 ## Deployment
 

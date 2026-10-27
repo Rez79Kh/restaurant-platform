@@ -17,6 +17,7 @@ written during the work, not afterwards. Entries line up with the commit history
 | 1405/08/05 | 20:55 | 21:35 | 0:40 | Phase 7: kitchen board, conditional status transitions, conflict handling, tests; manual UI check |
 | 1405/08/05 | 21:35 | 22:20 | 0:45 | Phase 8: discounts, voids, split payments, settle transaction, checkout tests; manual UI check |
 | 1405/08/05 | 22:20 | 22:35 | 0:15 | Phase 9: full-workflow test, README testing section |
+| 1405/08/05 | 22:35 | 23:10 | 0:35 | Phase 10: AI menu import (draft → review → confirm), validation, fallback, tests; manual check with a real menu photo |
 
-**Total so far:** 6:10 / 6:00
-**Overrun:** 0:10
+**Total so far:** 6:45 / 6:00
+**Overrun:** 0:45 - Phase 6 (ordering screens and concurrency tests) ran over its estimate; the bill calculation and PIN pepper were added during Phase 4; a local Docker disk failure cost time during Phase 5.
