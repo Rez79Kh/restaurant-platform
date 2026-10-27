@@ -24,9 +24,10 @@ services:
       db:
         condition: service_healthy
     environment:
-      # Phase 3 switches DATABASE_URL to the non-owner app_user role.
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/restaurant
+      # Runtime: non-owner app_user (RLS applies). Migrations: owner.
+      DATABASE_URL: postgresql://app_user:app_user_local@db:5432/restaurant
       DIRECT_URL: postgresql://postgres:postgres@db:5432/restaurant
+      APP_DB_PASSWORD: app_user_local
       LOG_LEVEL: info
     ports:
       - "3000:3000"

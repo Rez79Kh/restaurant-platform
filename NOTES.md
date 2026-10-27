@@ -86,3 +86,65 @@ Scratch file. Source material for DECISIONS.md later; not a final document.
   Logger redaction is a safety net, not the policy: unknown-error logs include
   the raw error, and Prisma errors can include query parameters, so call sites
   must keep PINs and phone numbers out of query errors where possible.
+
+## Phase 3 — Schema & isolation
+
+- **Generic idempotency table** (`idempotency_records`, unique on
+  `(restaurant_id, key)`) instead of `order_line.idempotency_key` — agreed.
+  A per-row key cannot replay the result of a conditional update (discount,
+  settle, status change): a retry after a lost response would hit a version
+  or status mismatch and show a false 409. Key inserted in the same
+  transaction as the mutation; a concurrent duplicate blocks on the unique
+  index, then reads the stored response. Not yet built: cleanup of old keys
+  (a TTL job); harmless at v1 volume.
+- **Plural snake_case table names** (`orders`, `order_lines`, …): `order` is
+  a reserved word and would need quoting in every raw SQL statement.
+- **Integrity rules in the database** (raw SQL migration), not only in code:
+  positive prices/quantities/payments, rates 0–100%, discount type+value+reason
+  together and percent ≤ 100%, settled ⇒ totals snapshot + settled_by present,
+  voided line ⇒ voided_by present. **One OPEN order per table** is a partial
+  unique index: two waiters opening the same table → exactly one wins.
+- **Percent discounts stored in basis points** (1000 = 10%), consistent with
+  VAT and service-charge rates; allows 12.5%.
+- **`updated_at` maintained by triggers**, because status changes are raw
+  conditional UPDATEs and the polling endpoint depends on the column.
+  Known limit for Phase 6: commit order ≠ timestamp order, so the
+  "changes since" query needs an overlap window.
+- **`login_attempts` is platform-level, not tenant-owned, no RLS.** Attempts
+  are counted before a restaurant is known (unknown slug) and per-IP limits
+  span restaurants. Stores the phone only as a hash. Failed logins for an
+  unknown slug can only be logged, not audit-logged (audit is per tenant).
+- **app_user privileges are minimal**: DML on tables, nothing on
+  `_prisma_migrations`, and **no UPDATE/DELETE on `audit_events`**
+  (append-only for the application).
+- **Role migration is idempotent** (role is cluster-wide: dev, test and the
+  Prisma shadow DB share it). A test runs it twice. The REVOKE on
+  `_prisma_migrations` is conditional because the shadow DB lacks that table.
+- **Password out of band**: `scripts/set-app-db-password.mts` (run by
+  `npm run db:setup`) applies `APP_DB_PASSWORD`. Production: Neon console or
+  the same script once.
+- **Fail closed**: unset context → `NULL` → no rows; malformed context →
+  uuid cast error; `withTenant` rejects a non-uuid id before touching the DB.
+- **ESLint `no-restricted-imports`** blocks `@/lib/db` outside `lib/db.ts`,
+  `lib/tenant.ts`, the health route and tests, so new code can't bypass
+  `withTenant` by accident.
+- **Tests verify themselves**: running the isolation suite with the runtime
+  URL pointed at the superuser makes all 12 role-dependent tests fail.
+- **`"type": "module"`** in package.json; Vite warned that the config
+  loaded ESM as CommonJS. Next build/dev verified afterwards.
+- **Prisma 7's `migrate dev` no longer runs `generate`.** `postinstall` covers
+  installs; after a schema change run `npx prisma generate`.
+
+### Open items carried forward
+
+- **Phase 4 (seed on Neon):** the Neon owner is not a superuser, so FORCE RLS
+  applies to it too. The seed must set `app.restaurant_id` per restaurant
+  (it will insert inside a tenant context, which also exercises the policies).
+- **Phase 5 (auth bootstrap):** login must find a restaurant by slug, and
+  session lookup must find a session by token hash, both *before* any tenant
+  context exists. Plan: two narrow `SECURITY DEFINER` functions (slug → id,
+  token hash → session/staff/role) granted to app_user. Those are the only
+  two ways across the tenant boundary, and each needs a secret or a known
+  slug.
+- **API-level isolation tests** (user of A calling routes with B's ids) come
+  with the routes in Phases 5–8.

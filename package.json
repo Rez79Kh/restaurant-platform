@@ -6,13 +6,16 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "start:docker": "prisma migrate deploy && next start -H 0.0.0.0",
+    "start:docker": "npm run db:setup && next start -H 0.0.0.0",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "db:setup": "prisma migrate deploy && node scripts/set-app-db-password.mts",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",
@@ -39,5 +42,6 @@
   },
   "engines": {
     "node": ">=24"
-  }
+  },
+  "type": "module"
 }

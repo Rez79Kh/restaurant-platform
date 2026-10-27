@@ -32,7 +32,7 @@ Requires Node 24+.
 cp .env.example .env
 docker compose up -d db     # Postgres only
 npm install                 # also generates the Prisma client
-npm run db:migrate          # apply / create migrations
+npm run db:setup            # apply migrations, set the app_user password
 npm run dev                 # http://localhost:3000
 ```
 
@@ -40,8 +40,10 @@ npm run dev                 # http://localhost:3000
 |---|---|
 | `npm run lint` | ESLint |
 | `npm run typecheck` | Generates Next route types, then `tsc --noEmit` |
-| `npm test` | Vitest (unit; integration tests use the `restaurant_test` database) |
-| `npm run db:deploy` | Apply migrations without prompting (CI / deploy) |
+| `npm test` | All tests. Integration tests need `docker compose up -d db` and use a separate `restaurant_test` database |
+| `npm run test:unit` / `test:integration` | One project only |
+| `npm run db:migrate` | Create a new migration (`prisma migrate dev`) |
+| `npm run db:setup` | Apply migrations and set the `app_user` password (idempotent) |
 
 ## Configuration
 
@@ -51,10 +53,27 @@ stops the server with a message naming the variable (never its value).
 
 - `DATABASE_URL` — the app's runtime connection (production: Neon **pooled**, as `app_user`).
 - `DIRECT_URL` — migrations only (production: Neon **direct**, as the owner).
+- `APP_DB_PASSWORD` — applied to `app_user` by `npm run db:setup`; never stored in a migration.
+
+The app must connect as `app_user` (not a superuser, not the table owner):
+Postgres superusers and table owners bypass Row-Level Security. An
+integration test fails if the runtime connection is misconfigured.
 
 ## Architecture
 
 _To be written (Phase 11)._
+
+### Tenant isolation (three independent layers)
+
+1. **Composite foreign keys** — every tenant table carries `restaurant_id`, and
+   every reference is `(restaurant_id, x_id) → (restaurant_id, id)`, so a row
+   cannot point at another restaurant's row.
+2. **Row-Level Security** — `ENABLE` + `FORCE` on every tenant table; policies
+   compare `restaurant_id` to `app.restaurant_id`. No context → zero rows.
+3. **`withTenant()`** — the only path to tenant data (enforced by an ESLint
+   rule). It sets `app.restaurant_id` transaction-locally, from the session only.
+
+Tests in `tests/integration/isolation.test.ts` exercise each layer separately.
 
 ## Testing
 

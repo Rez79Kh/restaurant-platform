@@ -1,5 +1,15 @@
-// Models are added in Phase 3 (schema & tenant isolation).
 // Connection URLs live in prisma.config.ts (CLI) and lib/db.ts (runtime).
+//
+// Tenant isolation, layer 1: every tenant-owned table carries restaurant_id,
+// every parent has @@unique([restaurantId, id]), and every relation between
+// tenant tables is a composite foreign key on (restaurant_id, x_id). A row can
+// therefore only ever reference rows of its own restaurant — enforced by
+// Postgres, regardless of application code.
+//
+// Layer 2 (RLS) and the constraints Prisma can't express (CHECKs, the
+// one-open-order-per-table index, updated_at triggers) are raw SQL migrations.
+//
+// Money is integer Toman. Rates are basis points (1000 = 10%).
 
 generator client {
   provider = "prisma-client"
@@ -8,4 +18,343 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+enum StaffRole {
+  MANAGER
+  STAFF
+  KITCHEN
+}
+
+enum OrderStatus {
+  OPEN
+  SETTLED
+  VOID
+}
+
+enum OrderLineStatus {
+  SENT
+  PREPARING
+  READY
+  SERVED
+  VOID
+}
+
+enum PaymentMethod {
+  CARD_READER // standalone bank POS (کارتخوان)
+  CASH
+  CARD_TRANSFER // card-to-card (کارت به کارت)
+}
+
+enum DiscountType {
+  AMOUNT // discount_value is Toman
+  PERCENT // discount_value is basis points (1000 = 10%)
+}
+
+enum MenuImportStatus {
+  READY // extracted, awaiting manager review
+  FAILED
+  CONFIRMED
+  DISCARDED
+}
+
+model Restaurant {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  name            String
+  slug            String   @unique
+  vatRateBp       Int      @default(1000) @map("vat_rate_bp")
+  serviceChargeBp Int      @default(0) @map("service_charge_bp")
+  timezone        String   @default("Asia/Tehran")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  branches           Branch[]
+  staffMembers       StaffMember[]
+  sessions           Session[]
+  menuCategories     MenuCategory[]
+  menuItems          MenuItem[]
+  diningTables       DiningTable[]
+  orders             Order[]
+  orderLines         OrderLine[]
+  payments           Payment[]
+  auditEvents        AuditEvent[]
+  menuImportDrafts   MenuImportDraft[]
+  idempotencyRecords IdempotencyRecord[]
+
+  @@map("restaurants")
+}
+
+// Exists in the schema only; v1 has one branch per restaurant and no branch UI.
+model Branch {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  restaurantId String   @map("restaurant_id") @db.Uuid
+  name         String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  restaurant   Restaurant    @relation(fields: [restaurantId], references: [id])
+  staffMembers StaffMember[]
+  diningTables DiningTable[]
+  orders       Order[]
+
+  @@unique([restaurantId, id])
+  @@map("branches")
+}
+
+model StaffMember {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  restaurantId String    @map("restaurant_id") @db.Uuid
+  branchId     String    @map("branch_id") @db.Uuid
+  name         String
+  phone        String // normalised 09xxxxxxxxx; never logged in full
+  pinHash      String    @map("pin_hash")
+  role         StaffRole
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [restaurantId, branchId], references: [restaurantId, id])
+
+  sessions         Session[]
+  ordersOpened     Order[]           @relation("OrderOpenedBy")
+  ordersSettled    Order[]           @relation("OrderSettledBy")
+  linesCreated     OrderLine[]       @relation("LineCreatedBy")
+  linesVoided      OrderLine[]       @relation("LineVoidedBy")
+  payments         Payment[]
+  auditEvents      AuditEvent[]
+  menuImportDrafts MenuImportDraft[]
+
+  @@unique([restaurantId, id])
+  @@unique([restaurantId, phone])
+  @@map("staff_members")
+}
+
+// DB-backed session. The cookie holds a random token; only its SHA-256 is stored.
+model Session {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  restaurantId  String   @map("restaurant_id") @db.Uuid
+  staffMemberId String   @map("staff_member_id") @db.Uuid
+  tokenHash     String   @unique @map("token_hash")
+  expiresAt     DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  restaurant  Restaurant  @relation(fields: [restaurantId], references: [id])
+  staffMember StaffMember @relation(fields: [restaurantId, staffMemberId], references: [restaurantId, id])
+
+  @@index([restaurantId, staffMemberId])
+  @@map("sessions")
+}
+
+model MenuCategory {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  restaurantId String   @map("restaurant_id") @db.Uuid
+  name         String
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  items      MenuItem[]
+
+  @@unique([restaurantId, id])
+  @@unique([restaurantId, name])
+  @@map("menu_categories")
+}
+
+model MenuItem {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  restaurantId String   @map("restaurant_id") @db.Uuid
+  categoryId   String   @map("category_id") @db.Uuid
+  name         String
+  priceToman   Int      @map("price_toman")
+  isAvailable  Boolean  @default(true) @map("is_available")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  restaurant Restaurant   @relation(fields: [restaurantId], references: [id])
+  category   MenuCategory @relation(fields: [restaurantId, categoryId], references: [restaurantId, id])
+  orderLines OrderLine[]
+
+  @@unique([restaurantId, id])
+  @@index([restaurantId, categoryId])
+  @@map("menu_items")
+}
+
+model DiningTable {
+  id           String @id @default(uuid(7)) @db.Uuid
+  restaurantId String @map("restaurant_id") @db.Uuid
+  branchId     String @map("branch_id") @db.Uuid
+  label        String
+  seats        Int
+  sortOrder    Int    @default(0) @map("sort_order")
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  branch     Branch     @relation(fields: [restaurantId, branchId], references: [restaurantId, id])
+  orders     Order[]
+
+  @@unique([restaurantId, id])
+  @@unique([restaurantId, branchId, label])
+  @@map("dining_tables")
+}
+
+// A table's check. table_id is null for takeaway. At most one OPEN order per
+// table (partial unique index in the integrity migration).
+model Order {
+  id                 String        @id @default(uuid(7)) @db.Uuid
+  restaurantId       String        @map("restaurant_id") @db.Uuid
+  branchId           String        @map("branch_id") @db.Uuid
+  tableId            String?       @map("table_id") @db.Uuid
+  status             OrderStatus   @default(OPEN)
+  // Optimistic lock for order-level changes (discount, settle, void).
+  version            Int           @default(1)
+  // Discount is stored as entered; the bill calculation derives Toman, so a
+  // percentage stays correct when items are added afterwards.
+  discountType       DiscountType? @map("discount_type")
+  discountValue      Int?          @map("discount_value")
+  discountReason     String?       @map("discount_reason")
+  // Totals snapshot, written once at settle so history never changes.
+  subtotalToman      Int?          @map("subtotal_toman")
+  discountToman      Int?          @map("discount_toman")
+  serviceChargeToman Int?          @map("service_charge_toman")
+  vatToman           Int?          @map("vat_toman")
+  totalToman         Int?          @map("total_toman")
+  openedById         String        @map("opened_by_id") @db.Uuid
+  settledById        String?       @map("settled_by_id") @db.Uuid
+  openedAt           DateTime      @default(now()) @map("opened_at") @db.Timestamptz(3)
+  settledAt          DateTime?     @map("settled_at") @db.Timestamptz(3)
+  // Maintained by a trigger; drives the "changes since" polling endpoint.
+  updatedAt          DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  restaurant Restaurant   @relation(fields: [restaurantId], references: [id])
+  branch     Branch       @relation(fields: [restaurantId, branchId], references: [restaurantId, id])
+  table      DiningTable? @relation(fields: [restaurantId, tableId], references: [restaurantId, id], onDelete: Restrict)
+  openedBy   StaffMember  @relation("OrderOpenedBy", fields: [restaurantId, openedById], references: [restaurantId, id])
+  settledBy  StaffMember? @relation("OrderSettledBy", fields: [restaurantId, settledById], references: [restaurantId, id], onDelete: Restrict)
+  lines      OrderLine[]
+  payments   Payment[]
+
+  @@unique([restaurantId, id])
+  @@index([restaurantId, branchId, status])
+  @@index([restaurantId, branchId, updatedAt])
+  @@map("orders")
+}
+
+// Adding items is always an INSERT of new lines, never a rewrite of the order,
+// so concurrent adds cannot overwrite each other. Name and price are
+// snapshots: menu changes never affect an existing bill.
+model OrderLine {
+  id                     String          @id @default(uuid(7)) @db.Uuid
+  restaurantId           String          @map("restaurant_id") @db.Uuid
+  orderId                String          @map("order_id") @db.Uuid
+  menuItemId             String          @map("menu_item_id") @db.Uuid
+  nameSnapshot           String          @map("name_snapshot")
+  unitPriceSnapshotToman Int             @map("unit_price_snapshot_toman")
+  quantity               Int
+  note                   String?
+  status                 OrderLineStatus @default(SENT)
+  createdById            String          @map("created_by_id") @db.Uuid
+  voidReason             String?         @map("void_reason")
+  voidedById             String?         @map("voided_by_id") @db.Uuid
+  createdAt              DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  restaurant Restaurant   @relation(fields: [restaurantId], references: [id])
+  order      Order        @relation(fields: [restaurantId, orderId], references: [restaurantId, id])
+  menuItem   MenuItem     @relation(fields: [restaurantId, menuItemId], references: [restaurantId, id])
+  createdBy  StaffMember  @relation("LineCreatedBy", fields: [restaurantId, createdById], references: [restaurantId, id])
+  voidedBy   StaffMember? @relation("LineVoidedBy", fields: [restaurantId, voidedById], references: [restaurantId, id], onDelete: Restrict)
+
+  @@unique([restaurantId, id])
+  @@index([restaurantId, orderId])
+  @@index([restaurantId, status])
+  @@index([restaurantId, updatedAt])
+  @@map("order_lines")
+}
+
+model Payment {
+  id           String        @id @default(uuid(7)) @db.Uuid
+  restaurantId String        @map("restaurant_id") @db.Uuid
+  orderId      String        @map("order_id") @db.Uuid
+  method       PaymentMethod
+  amountToman  Int           @map("amount_toman")
+  recordedById String        @map("recorded_by_id") @db.Uuid
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  restaurant Restaurant  @relation(fields: [restaurantId], references: [id])
+  order      Order       @relation(fields: [restaurantId, orderId], references: [restaurantId, id])
+  recordedBy StaffMember @relation(fields: [restaurantId, recordedById], references: [restaurantId, id])
+
+  @@index([restaurantId, orderId])
+  @@map("payments")
+}
+
+// Append-only: app_user has SELECT and INSERT only (see RLS migration).
+model AuditEvent {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  restaurantId String   @map("restaurant_id") @db.Uuid
+  actorId      String?  @map("actor_id") @db.Uuid // null when no staff member is known (e.g. failed login)
+  action       String // e.g. order.discount, order_line.void, order.settle, auth.login_failed
+  entity       String
+  entityId     String?  @map("entity_id")
+  data         Json     @default("{}")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  restaurant Restaurant   @relation(fields: [restaurantId], references: [id])
+  actor      StaffMember? @relation(fields: [restaurantId, actorId], references: [restaurantId, id], onDelete: Restrict)
+
+  @@index([restaurantId, createdAt])
+  @@index([restaurantId, entity, entityId])
+  @@map("audit_events")
+}
+
+// Platform-level, NOT tenant-owned: attempts are counted before we know (or
+// even if there is) a restaurant, and per-IP limits span restaurants. Holds
+// no tenant data — the phone is stored only as a hash.
+model LoginAttempt {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  ip             String
+  restaurantSlug String   @map("restaurant_slug")
+  phoneHash      String   @map("phone_hash")
+  succeeded      Boolean
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([ip, createdAt])
+  @@index([restaurantSlug, phoneHash, createdAt])
+  @@map("login_attempts")
+}
+
+model MenuImportDraft {
+  id           String           @id @default(uuid(7)) @db.Uuid
+  restaurantId String           @map("restaurant_id") @db.Uuid
+  createdById  String           @map("created_by_id") @db.Uuid
+  status       MenuImportStatus
+  // Extracted categories/items as edited by the manager; validated with Zod.
+  items        Json             @default("[]")
+  warnings     Json             @default("[]")
+  errorCode    String?          @map("error_code")
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  restaurant Restaurant  @relation(fields: [restaurantId], references: [id])
+  createdBy  StaffMember @relation(fields: [restaurantId, createdById], references: [restaurantId, id])
+
+  @@index([restaurantId, createdAt])
+  @@map("menu_import_drafts")
+}
+
+// One row per mutating request. The key is client-generated and inserted in
+// the same transaction as the mutation: a retry (or a concurrent duplicate)
+// hits the unique constraint and gets the stored response instead of
+// repeating the change.
+model IdempotencyRecord {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  restaurantId   String   @map("restaurant_id") @db.Uuid
+  key            String
+  route          String // a key reused on a different route is rejected
+  responseStatus Int?     @map("response_status")
+  responseBody   Json?    @map("response_body")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+
+  @@unique([restaurantId, key])
+  @@map("idempotency_records")
 }
