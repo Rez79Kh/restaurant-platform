@@ -5,6 +5,8 @@ orders from their phones, the kitchen sees new items within seconds, and the
 bill closes only when payments match the total. See [SCOPE.md](SCOPE.md) for
 what v1 does and does not include.
 
+**Live:** <https://restaurant-platform-bay.vercel.app/> (demo logins below).
+
 ## Run it locally (one command)
 
 Requires Docker.
@@ -173,11 +175,94 @@ Decisions and trade-offs, with reasons, are logged in [NOTES.md](NOTES.md).
 
 Tests in `tests/integration/isolation.test.ts` exercise each layer separately.
 
+## Security
+
+These are the four risks we designed against. Reasons and trade-offs are in
+[DECISIONS.md](DECISIONS.md#security-and-tenancy).
+
+**1. One restaurant sees or changes another's data**
+- **Risk:** a forgotten filter, a spoofed id, or a pooled connection that
+  carries one tenant's context into another tenant's request.
+- **What we did:**
+  - The three isolation layers above. The restaurant comes only from the
+    session.
+  - The tenant setting is transaction-local.
+  - The server refuses to start if its database role can bypass RLS.
+- **Evidence:** `isolation.test.ts`:
+  - each layer is tested on its own;
+  - with no tenant context, queries return zero rows;
+  - the setting doesn't survive on a reused connection;
+  - the startup guard rejects a superuser.
+
+  In `ordering.test.ts` and `kitchen.test.ts`, a user of restaurant B
+  using restaurant A's ids gets 404 or 409. In `auth.test.ts`, a spoofed
+  restaurant header or query parameter is ignored.
+
+**2. PIN brute force**
+- **Risk:** a 4–6 digit PIN has at most a million values. It can be
+  guessed online, or cracked offline from a leaked database.
+- **What we did:**
+  - **Online:**
+    - Login limits are stored in Postgres: 5 failures per account and 20
+      per IP within 15 minutes.
+    - Every failure gets the same 401, and an unknown account still runs
+      one scrypt, so responses don't reveal which accounts exist.
+  - **Offline:** PINs are HMAC'd with a secret pepper from the environment
+    before scrypt, so a database dump alone can't be cracked.
+- **Evidence:**
+  - `auth.test.ts`: lockout after 5 failures even with the right PIN, the
+    per-IP limit, identical answers, and failures audit-logged.
+  - `lib/pin.test.ts`: the right PIN under a different pepper fails.
+
+**3. Staff fraud through discounts and voids**
+- **Risk:** taking cash and then discounting or voiding the item so the
+  bill still balances, or editing the record afterwards.
+- **What we did:**
+  - Discounts are manager-only.
+  - Staff can void only items the kitchen hasn't started; anything later
+    needs a manager.
+  - Every discount, void, discount removal and settle needs a reason and
+    writes an audit event: who, when, and the values before and after.
+  - The app's database role cannot update or delete audit events.
+  - A settled bill stores its totals and can't be edited.
+- **Evidence:**
+  - `checkout.test.ts`: STAFF and KITCHEN cannot discount, staff cannot
+    void once the kitchen has started, discounts and voids are audited,
+    and a settled bill never changes.
+  - `isolation.test.ts`: the app cannot update or delete the audit log.
+
+**4. AI prompt injection and malicious uploads**
+- **Risk:**
+  - Text in a menu photo tells the model to change prices.
+  - A non-image or oversized file is uploaded.
+  - The import is abused to run up AI costs.
+- **What we did:**
+  - **The model can only fill a draft:**
+    - The system prompt treats image text as data.
+    - The model has no tools and no write access.
+    - Its output must match a strict schema; extra fields are dropped and
+      anything else is rejected.
+    - A manager reviews and confirms every row before anything reaches the
+      menu.
+  - **Upload limits:**
+    - The file type is checked by its bytes (JPEG, PNG, WebP), not by
+      what the client claims.
+    - 4 MB maximum.
+    - Manager-only.
+    - 10 imports per restaurant per hour.
+- **Evidence:**
+  - `lib/ai/menu-checks.test.ts`: an injected field is dropped.
+  - `menu-import.test.ts`: only real images within the size limit are
+    accepted; import is manager-only and rate limited; nothing reaches
+    the menu without confirm.
+  - Live test: an instruction planted in the image was ignored (see
+    NOTES.md, Phase 10).
+
 ## Testing
 
 ```bash
 docker compose up -d db   # integration tests need the compose Postgres
-npm test                  # 136 tests: 41 unit + 95 integration, about 10 s
+npm test                  # 137 tests: 41 unit + 96 integration, about 10 s
 ```
 
 Integration tests run against a real Postgres (a separate `restaurant_test`
